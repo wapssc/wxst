@@ -1252,3 +1252,23 @@ html body.lt-player-page .error-action-primary {
         transition-duration: 0.001ms !important;
     }
 }
+
+/* Search and resume improvements */
+#continueWatching { width: 100%; max-width: 80rem; margin: 1.4rem auto 0; }
+.continue-watching-list { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,14rem),1fr)); gap: .75rem; margin-top: .8rem; }
+.continue-card { text-align: left; background: rgba(23,27,43,.9); border: 1px solid rgba(130,146,195,.27); border-radius: 14px; color: #f5f7ff; padding: .9rem 1rem; min-height: 74px; display: flex; flex-direction: column; gap: .25rem; }
+.continue-card:hover,.continue-card:focus-visible { border-color: #8b77ff; }
+.continue-card span { color: #b9c1d5; font-size: .86rem; }
+.continue-progress { height: 4px; border-radius: 5px; background: #31384d; margin-top: .35rem; overflow: hidden; }
+.continue-progress span { display: block; height: 100%; background: linear-gradient(90deg,#8266f0,#35bfe9); }
+.search-progress { display: block; font-size: .75rem; color: #b9c1d5; }
+.grouped-source-button { display:block; width:100%; padding: .75rem; margin:.4rem 0; color:white; background:#1b253a; border:1px solid #45516c; border-radius:9px; text-align:left; }
+.grouped-source-button:hover,.grouped-source-button:focus-visible { border-color:#806df0; }
+
+#watchLater { width:100%; max-width:80rem; margin:1.2rem auto 0; }
+.watch-later-card { flex-direction:row; align-items:center; justify-content:space-between; gap:.5rem; }
+.watch-later-card button:first-child { text-align:left; flex:1; }
+.watch-later-card button:last-child { min-height:44px; color:#c5d4f4; padding:.3rem .65rem; border:1px solid #546380; border-radius:8px; }
+
+#homeEmptyGuide { max-width:80rem; margin:1.5rem auto 0; padding:1rem; border:1px solid #46516f; border-radius:12px; color:#d4deed; display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; }
+#homeEmptyGuide.hidden {display:none!important;}

@@ -9,6 +9,9 @@ let currentEpisodes = [];
 // 添加当前视频的标题
 let currentVideoTitle = '';
 let currentSearchResults = [];
+let currentSearchGroups = [];
+let activeSearchRequest = 0;
+let activeSearchController = null;
 let activeMovieSourceSession = null;
 let movieDetailRequestId = 0;
 // 全局变量用于倒序状态
@@ -710,6 +713,8 @@ function resetSearchArea() {
     document.getElementById('searchArea').classList.add('flex-1');
     document.getElementById('searchArea').classList.remove('mb-8');
     document.getElementById('resultsArea').classList.add('hidden');
+    window.renderContinueWatching?.();
+    window.renderWatchLater?.();
 
     // 确保页脚正确显示，移除相对定位
     const footer = document.querySelector('.footer');
@@ -782,95 +787,74 @@ async function search() {
         return;
     }
 
+    const request = ++activeSearchRequest;
+    activeSearchController?.abort();
+    const controller = new AbortController();
+    activeSearchController = controller;
     showLoading();
-
+    saveSearchHistory(query);
+    let allResults = [];
+    let completed = 0;
+    let loadingVisible = true;
+    const resultsArea = document.getElementById('resultsArea');
+    document.getElementById('searchArea').classList.remove('flex-1');
+    document.getElementById('searchArea').classList.add('mb-8');
+    resultsArea.classList.remove('hidden');
+    document.getElementById('doubanArea')?.classList.add('hidden');
+    document.getElementById('continueWatching')?.classList.add('hidden');
+    document.getElementById('watchLater')?.classList.add('hidden');
+    const releaseLoading = () => { if (loadingVisible) { hideLoading(); loadingVisible = false; } };
     try {
-        // 保存搜索历史
-        saveSearchHistory(query);
-
-        // 从所有选中的API源搜索
-        let allResults = [];
-        const searchPromises = searchableApiIds.map(apiId =>
-            searchByAPIAndKeyWord(apiId, query)
-        );
-
-        // 等待所有搜索请求完成
-        const resultsArray = await Promise.all(searchPromises);
-
-        // 合并所有结果
-        resultsArray.forEach(results => {
-            if (Array.isArray(results) && results.length > 0) {
-                allResults = allResults.concat(results);
-            }
-        });
-
+        window.history.pushState({search: query}, `搜索: ${query} - LibreTV`, `/s=${encodeURIComponent(query)}`);
+        document.title = `搜索: ${query} - LibreTV`;
+    } catch (error) { console.warn('更新浏览器历史失败:', error); }
+    const update = () => {
+        if (request !== activeSearchRequest) return;
         allResults = filterYellowContentResults(allResults);
-
-        // 对搜索结果进行排序：按名称优先，名称相同时按接口源排序
-        allResults.sort((a, b) => {
-            // 首先按照视频名称排序
-            const nameCompare = (a.vod_name || '').localeCompare(b.vod_name || '');
-            if (nameCompare !== 0) return nameCompare;
-            
-            // 如果名称相同，则按照来源排序
-            return (a.source_name || '').localeCompare(b.source_name || '');
-        });
+        allResults.sort((a,b) => (a.vod_name || '').localeCompare(b.vod_name || '') || (a.source_name || '').localeCompare(b.source_name || ''));
         currentSearchResults = allResults;
-
-        // 更新搜索结果计数
-        const searchResultsCount = document.getElementById('searchResultsCount');
-        if (searchResultsCount) {
-            searchResultsCount.textContent = allResults.length;
-        }
-
-        // 显示结果区域，调整搜索区域
-        document.getElementById('searchArea').classList.remove('flex-1');
-        document.getElementById('searchArea').classList.add('mb-8');
-        document.getElementById('resultsArea').classList.remove('hidden');
-
-        // 隐藏豆瓣推荐区域（如果存在）
-        const doubanArea = document.getElementById('doubanArea');
-        if (doubanArea) {
-            doubanArea.classList.add('hidden');
-        }
-
-        const resultsDiv = document.getElementById('results');
-
-        // 如果没有结果
-        if (!allResults || allResults.length === 0) {
-            resultsDiv.innerHTML = `
-                <div class="col-span-full text-center py-16">
-                    <svg class="mx-auto h-12 w-12 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
-                              d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <h3 class="mt-2 text-lg font-medium text-gray-400">没有找到匹配的结果</h3>
-                    <p class="mt-1 text-sm text-gray-500">请尝试其他关键词或更换数据源</p>
-                </div>
-            `;
-            hideLoading();
-            return;
-        }
-
-        // 有搜索结果时，才更新URL
+        currentSearchGroups = LibreExperience.groupResults(allResults);
+        renderSearchResults(query, currentSearchGroups, completed, searchableApiIds.length);
+        releaseLoading();
+    };
+    await Promise.all(searchableApiIds.map(async apiId => {
         try {
-            // 使用URI编码确保特殊字符能够正确显示
-            const encodedQuery = encodeURIComponent(query);
-            // 使用HTML5 History API更新URL，不刷新页面
-            window.history.pushState(
-                { search: query },
-                `搜索: ${query} - LibreTV`,
-                `/s=${encodedQuery}`
-            );
-            // 更新页面标题
-            document.title = `搜索: ${query} - LibreTV`;
-        } catch (e) {
-            console.error('更新浏览器历史失败:', e);
-            // 如果更新URL失败，继续执行搜索
+            await searchByAPIAndKeyWord(apiId, query, batch => {
+                if (request !== activeSearchRequest || controller.signal.aborted) return;
+                allResults.push(...batch);
+                update();
+            }, controller.signal);
+        } finally {
+            if (request !== activeSearchRequest) return;
+            completed++;
+            update();
         }
+    }));
+    if (request === activeSearchRequest) releaseLoading();
+}
 
+function cancelActiveSearch() {
+    activeSearchRequest++;
+    activeSearchController?.abort();
+    activeSearchController = null;
+    hideLoading();
+}
+window.cancelActiveSearch = cancelActiveSearch;
+
+function renderSearchResults(query, groups, completed, total) {
+    const resultsDiv = document.getElementById('results');
+    const count = document.getElementById('searchResultsCount');
+    if (count) count.textContent = String(groups.length);
+    const status = document.getElementById('searchProgress');
+    if (status) status.textContent = completed < total ? `已搜索 ${completed}/${total} 个来源，结果持续更新` : `已完成 ${total} 个来源`;
+    if (!groups.length) {
+        resultsDiv.innerHTML = `<div class="col-span-full text-center py-16 text-gray-400">${completed < total ? '正在查找影片…' : '没有找到匹配的结果，请尝试其他关键词或数据源'}</div>`;
+        return;
+    }
+    try {
         // 添加XSS保护，使用textContent和属性转义
-        const safeResults = allResults.map((item, resultIndex) => {
+        const safeResults = groups.map((group, resultIndex) => {
+            const item = group[0];
             const safeId = item.vod_id ? item.vod_id.toString().replace(/[^\w-]/g, '') : '';
             const safeName = (item.vod_name || '').toString()
                 .replace(/</g, '&lt;')
@@ -879,7 +863,7 @@ async function search() {
             const resultTypeLabel = getResultTypeLabel(item);
             const safeTypeLabel = escapeHtmlAttr(resultTypeLabel);
             const resultTypeClass = getResultTypeLabelClass(item);
-            const sourceInfo = item.source_name ?
+            const sourceInfo = group.length > 1 ? `<span class="bg-[#222] text-xs px-1.5 py-0.5 rounded-full">${group.length} 个来源</span>` : item.source_name ?
                 `<span class="bg-[#222] text-xs px-1.5 py-0.5 rounded-full">${escapeHtmlAttr(item.source_name)}</span>` : '';
             const sourceCode = item.source_code || '';
             const apiBaseUrl = item.api_url || (sourceCode && API_SITES[sourceCode]?.api) || '';
@@ -895,7 +879,7 @@ async function search() {
 
             return `
                 <div class="card-hover bg-[#111] rounded-lg overflow-hidden cursor-pointer transition-all hover:scale-[1.02] h-full shadow-sm hover:shadow-md" 
-                     onclick="quickPlaySearchResult(${resultIndex})" ${apiUrlAttr}>
+                     onclick="quickPlaySearchResult(${resultIndex})" onkeydown="if(event.target === this && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); quickPlaySearchResult(${resultIndex}); }" role="button" tabindex="0" ${apiUrlAttr}>
                     <div class="flex h-full">
                         ${hasCover ? `
                         <div class="relative flex-shrink-0 search-card-img-container">
@@ -927,7 +911,8 @@ async function search() {
                             
                             <div class="flex justify-between items-center mt-1 pt-1 border-t border-gray-800">
                                 ${sourceInfo ? `<div>${sourceInfo}</div>` : '<div></div>'}
-                                <button type="button" class="quick-card-details" onclick="event.stopPropagation(); quickPlaySearchResult(${resultIndex}, true)">详情</button>
+                                <button type="button" class="quick-card-details" onclick="event.stopPropagation(); quickPlaySearchResult(${resultIndex}, true)">${group.length > 1 ? '查看来源' : '详情'}</button>
+                                <button type="button" class="quick-card-details" onclick="event.stopPropagation(); saveSearchResultForLater(${resultIndex})">稍后看</button>
                                 <!-- 接口名称过长会被挤变形
                                 <div>
                                     <span class="text-gray-500 flex items-center hover:text-blue-400 transition-colors">
@@ -947,14 +932,7 @@ async function search() {
 
         resultsDiv.innerHTML = safeResults;
     } catch (error) {
-        console.error('搜索错误:', error);
-        if (error.name === 'AbortError') {
-            showToast('搜索请求超时，请检查网络连接', 'error');
-        } else {
-            showToast('搜索请求失败，请稍后重试', 'error');
-        }
-    } finally {
-        hideLoading();
+        console.error('搜索结果渲染失败:', error);
     }
 }
 
@@ -1244,6 +1222,7 @@ async function showDetails(id, vod_name, sourceCode) {
 
             currentEpisodes = data.episodes;
             localStorage.setItem('currentEpisodeNames', JSON.stringify(data.episodeNames || []));
+            window.EpisodeContext?.write({source:sourceCode, id, episodes:data.episodes, episodeNames:data.episodeNames || []});
             currentEpisodeIndex = 0;
 
             detailBody.innerHTML = `
@@ -1607,8 +1586,40 @@ window.getResultTypeLabel = getResultTypeLabel;
 // 移除Node.js的require语句，因为这是在浏览器环境中运行的
 
 function quickPlaySearchResult(index, details = false) {
-    const item = currentSearchResults[index];
-    if (!item) return;
-    if (details) return showDetails(item.vod_id, item.vod_name, item.source_code);
-    QuickPlay.open({ ...QuickPlay.logic.identity(item), id: String(item.vod_id), source: item.source_code });
+    const group = currentSearchGroups[index];
+    if (!group?.length) return;
+    const item = group[0];
+    if (details && group.length === 1) return showDetails(item.vod_id, item.vod_name, item.source_code);
+    if (details) return showGroupedSearchSources(index);
+    const request = QuickPlay.logic.identity(item);
+    QuickPlay.open(group.length > 1 ? request : {...request, id: String(item.vod_id), source: item.source_code});
+}
+
+function showGroupedSearchSources(index) {
+    const group = currentSearchGroups[index];
+    if (!group) return;
+    const modal = document.getElementById('modal');
+    document.getElementById('modalTitle').textContent = group[0].vod_name || '选择资源';
+    const content = document.getElementById('modalContent');
+    content.replaceChildren();
+    const heading = document.createElement('p');
+    heading.textContent = `找到 ${group.length} 个来源，点击查看该来源详情或直接点影片卡片播放`;
+    content.appendChild(heading);
+    group.forEach(item => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'grouped-source-button';
+        button.textContent = item.source_name || item.source_code || '资源';
+        button.onclick = () => showDetails(item.vod_id, item.vod_name, item.source_code);
+        content.appendChild(button);
+    });
+    modal.classList.remove('hidden');
+}
+
+function saveSearchResultForLater(index) {
+    const group = currentSearchGroups[index];
+    if (!group?.length) return;
+    const item = group[0];
+    LibreExperience.addWatchLater({...QuickPlay.logic.identity(item), ...(group.length === 1 ? {source:item.source_code, id:item.vod_id} : {})});
+    showToast('已加入稍后看', 'success');
 }

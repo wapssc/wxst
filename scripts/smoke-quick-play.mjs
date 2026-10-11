@@ -16,7 +16,7 @@ async function scenario({mobile=false, series=false, history=false, ambiguous=fa
  await context.addInitScript(({hash,history,title,series,unmapped,allfail})=>{
   localStorage.setItem('passwordVerified',JSON.stringify({verified:true,timestamp:Date.now(),passwordHash:hash}));
   localStorage.setItem('proxyAuthHash',hash);localStorage.setItem('hasSeenDisclaimer','true');localStorage.setItem('firstRunGuideSeen','true');localStorage.setItem('doubanEnabled','false');
-  localStorage.setItem('selectedAPIs',JSON.stringify(allfail?['ysgc','jszy','wujin','maoyan']:['ysgc','jszy']));localStorage.setItem('defaultApiMigrationVersion','20260511-sources-v2');
+  localStorage.setItem('selectedAPIs',JSON.stringify(allfail?['ysgc','jszy','wujin','maoyan']:['ysgc','jszy']));localStorage.setItem('hasInitializedDefaults','true');localStorage.setItem('defaultApiMigrationVersion','20260511-sources-v2');
   if(history && !localStorage.getItem('viewingHistory'))localStorage.setItem('viewingHistory',JSON.stringify([{title,movieYear:'2026',movieKind:series?'tv':'movie',sourceName:'jszy',vod_id:unmapped?'retired':series?'series1':'movie1',episodeIndex:1,episodeName:unmapped?'':'第02集',playbackPosition:15,timestamp:Date.now()}]));
  },{hash,history,title,series,unmapped,allfail});
  const page=await context.newPage();page.setDefaultTimeout(30000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -45,7 +45,7 @@ async function scenario({mobile=false, series=false, history=false, ambiguous=fa
    if(adult) renderAdultCards([{vod_name:title,vod_year:'2026',type_name:'剧情片',vod_id:'movie1',source_code:'jszy'}],c);
    else renderDoubanCards({subjects:[{title,year:ambiguous?'':'2026',rate:'8',cover:'',url:'#'}]},c);
  },{title,series,ambiguous,adult});
- await page.locator('#testCards button').click();
+ await page.locator('#testCards button[data-quick-entry]').click();
  await page.waitForURL('**/player.html?**');
  if(ambiguous){await page.getByText('找到不同版本，请确认要观看的作品').waitFor();assert.equal(await page.locator('#quickPlayChoices button').count(),2);await page.locator('#quickPlayChoices button').filter({hasText:'2026'}).click();}
  if(allfail){
@@ -63,7 +63,16 @@ async function scenario({mobile=false, series=false, history=false, ambiguous=fa
  if(history&&!unmapped){assert.ok(media.time>=15);assert.equal(new URL(page.url()).searchParams.get('source'),'jszy');}
  if(unmapped){assert.equal(new URL(page.url()).searchParams.get('index'),'1');assert.equal(new URL(page.url()).searchParams.has('position'),false);}
  if(adult)assert.equal(new URL(page.url()).searchParams.get('source'),'jszy');
- if(manualSwitch){await page.evaluate(()=>switchToResource('jszy','movie1'));await page.waitForURL(u=>u.searchParams.get('source')==='jszy');await page.waitForFunction(()=>document.querySelector('video')?.currentTime>1);}
+ if(manualSwitch){
+  await page.locator('#switchResourceBtn').click();
+  await page.locator('.resource-switch-row[data-current="true"]').waitFor();
+  await page.waitForFunction(()=>document.querySelectorAll('.resource-switch-row').length>=2);
+  assert.equal(await page.locator('.resource-switch-row img').count(),0);
+  await page.waitForFunction(()=>document.querySelector('.resource-switch-grid')?.textContent.includes('延迟'));
+  await page.screenshot({path:'/tmp/libretv-source-list-mobile.png'});
+  await page.evaluate(()=>closeModal());
+  await page.evaluate(()=>switchToResource('jszy','movie1'));await page.waitForURL(u=>u.searchParams.get('source')==='jszy');await page.waitForFunction(()=>document.querySelector('video')?.currentTime>1);
+ }
  if(historyEntry){
   await page.evaluate(()=>saveToHistory());
   const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('viewingHistory'))[0]);
@@ -93,14 +102,17 @@ async function scenario({mobile=false, series=false, history=false, ambiguous=fa
    return {success,rejected,locked,unlocked};
   });assert.equal(orientation.success,true);assert.equal(orientation.rejected,false);assert.ok(orientation.unlocked>0);
  }
- if(await page.locator('#playbackOptions').isVisible())await page.locator('#quickSettingsButton').click();
+ if(await page.locator('#quickMoreActions').isVisible())await page.locator('#quickSettingsButton').click();
  await page.locator('#quickSettingsButton').click();
+ assert.equal(await page.locator('#quickMoreActions').isVisible(),true);
+ await page.getByRole('button',{name:'播放设置',exact:true}).click();
  assert.equal(await page.locator('#playbackOptions').isVisible(),true);
  await page.locator('#quickSettingsButton').click();
  const detailCountBeforePause=details;
  assert.equal(await page.evaluate(()=>{document.querySelector('video').pause();return QuickPlay.onError();}),false);
  await page.waitForTimeout(150);
  assert.equal(details,detailCountBeforePause,'no source retries after playback or pause');
+ await page.locator('#quickSettingsButton').click();
  await page.getByRole('button',{name:'影片详情',exact:true}).click();await page.locator('#modal').waitFor({state:'visible'});
  await page.waitForFunction(()=>document.getElementById('modalContent').textContent.includes('真实解码验收'));
  assert.match(await page.locator('#modalContent').innerText(),/真实解码验收/);

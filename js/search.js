@@ -78,8 +78,11 @@ function withSourceInfo(item, apiId, context) {
     };
 }
 
-async function fetchVodApiJson(apiUrl, headers = API_CONFIG.search.headers) {
+async function fetchVodApiJson(apiUrl, headers = API_CONFIG.search.headers, outerSignal) {
     const controller = new AbortController();
+    const abort = () => controller.abort();
+    outerSignal?.addEventListener('abort', abort, {once:true});
+    if (outerSignal?.aborted) controller.abort();
     const timeoutId = setTimeout(() => controller.abort(), 15000);
 
     try {
@@ -99,6 +102,7 @@ async function fetchVodApiJson(apiUrl, headers = API_CONFIG.search.headers) {
         return await response.json();
     } finally {
         clearTimeout(timeoutId);
+        outerSignal?.removeEventListener('abort', abort);
     }
 }
 
@@ -107,13 +111,13 @@ function normalizeApiList(data, apiId, context) {
     return data.list.map(item => withSourceInfo(item, apiId, context));
 }
 
-async function searchByAPIAndKeyWord(apiId, query) {
+async function searchByAPIAndKeyWord(apiId, query, onBatch, signal) {
     try {
         const context = getApiSearchContext(apiId);
         if (!context) return [];
 
         const apiUrl = context.apiBaseUrl + API_CONFIG.search.path + encodeURIComponent(query);
-        const data = await fetchVodApiJson(apiUrl);
+        const data = await fetchVodApiJson(apiUrl, API_CONFIG.search.headers, signal);
         
         if (!data || !data.list || !Array.isArray(data.list) || data.list.length === 0) {
             return [];
@@ -122,6 +126,7 @@ async function searchByAPIAndKeyWord(apiId, query) {
         // 处理第一页结果
         const firstPageResults = normalizeApiList(data, apiId, context);
         const results = filterSearchResultsByQuery(firstPageResults, query);
+        if (results.length && !signal?.aborted) onBatch?.([...results]);
         if (firstPageResults.length > 0 && results.length === 0) {
             return [];
         }
@@ -144,12 +149,14 @@ async function searchByAPIAndKeyWord(apiId, query) {
                 // 创建获取额外页的Promise
                 const pagePromise = (async () => {
                     try {
-                        const pageData = await fetchVodApiJson(pageUrl);
+                        const pageData = await fetchVodApiJson(pageUrl, API_CONFIG.search.headers, signal);
                         
                         if (!pageData || !pageData.list || !Array.isArray(pageData.list)) return [];
                         
                         // 处理当前页结果
-                        return filterSearchResultsByQuery(normalizeApiList(pageData, apiId, context), query);
+                        const batch = filterSearchResultsByQuery(normalizeApiList(pageData, apiId, context), query);
+                        if (batch.length && !signal?.aborted) onBatch?.(batch);
+                        return batch;
                     } catch (error) {
                         console.warn(`API ${apiId} 第${page}页搜索失败:`, error);
                         return [];

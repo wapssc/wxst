@@ -2,6 +2,24 @@
 
 All notable changes to this maintained LibreTV fork are documented here.
 
+## 1.2.26 - 2026-10-12
+
+### Added
+
+- Home page shows unfinished videos with episode and progress, and supports a local Watch Later list.
+- Search reveals fast source results immediately and groups matching title, year and type into one card with source choices.
+- Playback records local startup and stall performance to prefer reliable sources without delaying first play.
+
+### Changed
+
+- Player actions are grouped into source, episode and more controls; source choices use a compact, live speed list.
+- Playback status clears only after video starts. Episode lists are isolated by tab and verified against the current source for shared links.
+
+### Fixed
+
+- Slow search sources no longer block fast results; stale search responses cannot replace a newer query.
+- Automatic retries are bounded, and a user-selected source is never replaced automatically.
+
 ## 1.2.25 - 2026-10-11
 
 ### Added

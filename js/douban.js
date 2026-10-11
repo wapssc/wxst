@@ -201,6 +201,7 @@ function updateDoubanVisibility() {
         !document.getElementById('resultsArea').classList.contains('hidden');
     
     // 只有在启用且没有搜索结果显示时才显示豆瓣区域
+    window.renderHomeGuide?.();
     if (isEnabled && !isSearching) {
         doubanArea.classList.remove('hidden');
         // 如果豆瓣结果为空，重新加载
@@ -758,6 +759,7 @@ function renderDoubanCards(data, container) {
                             title="${safeTitle}">
                         ${safeTitle}
                     </button>
+                    <button data-watch-later class="text-xs text-gray-300 mt-2" type="button">稍后看</button>
                 </div>
             `;
             
@@ -765,6 +767,10 @@ function renderDoubanCards(data, container) {
                 if (event.target.closest('a')) return;
                 QuickPlay.open({ title: item.title, year: item.year || '', kind: doubanMovieTvCurrentSwitch === 'tv' ? 'tv' : 'movie' });
             }));
+            card.querySelector('[data-watch-later]')?.addEventListener('click', () => {
+                LibreExperience.addWatchLater({title:item.title,year:item.year || '',kind:doubanMovieTvCurrentSwitch === 'tv' ? 'tv' : 'movie'});
+                showToast('已加入稍后看', 'success');
+            });
             fragment.appendChild(card);
         });
     }
@@ -776,7 +782,9 @@ function renderDoubanCards(data, container) {
 
 // 重置到首页
 function resetToHome() {
+    window.cancelActiveSearch?.();
     resetSearchArea();
+    window.renderHomeGuide?.();
     updateDoubanVisibility();
 }
 

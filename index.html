@@ -257,6 +257,20 @@
                 </div>
             </div>
 
+            <section id="homeEmptyGuide" class="lt-section hidden" aria-label="发现影片">
+                <p>想找点好看的？试试搜索片名，或看看热门推荐。</p>
+                <button type="button" class="lt-btn lt-btn-sm" onclick="enableHomeRecommendations()">开启热门推荐</button>
+            </section>
+            <section id="continueWatching" class="lt-section hidden" aria-label="继续观看">
+                <div class="lt-section-head"><h2 class="lt-section-title">继续观看</h2><button type="button" class="lt-btn lt-btn-sm" onclick="toggleHistory()">全部历史</button></div>
+                <div id="continueWatchingList" class="continue-watching-list"></div>
+            </section>
+
+            <section id="watchLater" class="lt-section hidden" aria-label="稍后看">
+                <div class="lt-section-head"><h2 class="lt-section-title">稍后看</h2></div>
+                <div id="watchLaterList" class="continue-watching-list"></div>
+            </section>
+
             <!-- 豆瓣热门推荐区域: 默认隐藏 -->
             <section id="doubanArea" class="lt-section w-full mt-12 mb-4 hidden">
                 <div class="mx-auto max-w-screen-xl px-1">
@@ -294,7 +308,8 @@
                     <div class="flex justify-between items-center mb-4">
                         <h2 class="lt-section-title">搜索结果</h2>
                         <div class="lt-results-meta">
-                            <span id="searchResultsCount">0</span> 个结果
+                            <span id="searchResultsCount">0</span> 部影片
+                            <span id="searchProgress" class="search-progress" aria-live="polite"></span>
                         </div>
                     </div>
                     <div id="results" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -341,7 +356,7 @@
         <div class="bg-[#111] p-8 rounded-lg w-11/12 max-w-4xl border border-[#333] max-h-[90vh] flex flex-col">
             <div class="flex justify-between items-center mb-6 flex-none">
                 <h2 id="modalTitle" class="text-2xl font-bold gradient-text break-words pr-4 max-w-[80%]"></h2>
-                <button onclick="closeModal()" class="text-gray-400 hover:text-white text-2xl transition-colors flex-shrink-0">&times;</button>
+                <button onclick="closeModal()" aria-label="关闭弹窗" class="text-gray-400 hover:text-white text-2xl transition-colors flex-shrink-0">&times;</button>
             </div>
             <div id="modalContent" class="overflow-auto flex-1 min-h-0">
                 <div class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2">
@@ -436,6 +451,9 @@
     <script src="js/password.js"></script>
     <script src="js/search.js"></script>
     <script src="js/quick-play.js"></script>
+    <script src="js/experience.js"></script>
+    <script src="js/episode-context.js"></script>
+    <script src="js/modal-accessibility.js"></script>
     <script src="js/config-manager.js"></script>
     <script src="js/source-health.js"></script>
     <script src="js/onboarding.js"></script>

@@ -65,7 +65,7 @@
     function setStatus(text) {
         const panel = document.getElementById('quickPlayStatus');
         if (!panel) return;
-        panel.hidden = false;
+        panel.hidden = text === '播放中';
         panel.querySelector('[data-quick-status]').textContent = text;
     }
     function name(source) {
@@ -173,6 +173,7 @@
         localStorage.setItem('currentEpisodes', JSON.stringify(detail.episodes));
         localStorage.setItem('currentEpisodeIndex', index);
         localStorage.setItem('currentEpisodeNames', JSON.stringify(detail.episodeNames || []));
+        window.EpisodeContext?.write({source:item.source_code, id:item.vod_id, episodes:detail.episodes, episodeNames:detail.episodeNames || []});
         url.searchParams.set('episodeName', detail.episodeNames?.[index] || '');
         history.replaceState({}, '', url);
         session.current = { item, detail, index };
@@ -180,7 +181,7 @@
         session.request.kind = url.searchParams.get('kind');
         session.items = session.items.filter(candidate => matches(candidate, session.request));
         document.getElementById('quickPlayChoices').hidden = true;
-        setStatus(resume?.playbackPosition > 0 ? `继续观看 · ${detail.episodes.length > 1 ? '第 ' + (index + 1) + ' 集 · ' : ''}${name(item.source_code)}` : `正在播放 · ${name(item.source_code)}`);
+        setStatus(resume?.playbackPosition > 0 ? `正在连接，准备从上次进度继续 · ${name(item.source_code)}` : `正在连接 · ${name(item.source_code)}`);
         return session.current;
     }
     async function prepare() {
@@ -201,6 +202,10 @@
         if (request.id && request.source) item = { vod_id: request.id, source_code: request.source, vod_name: request.title, vod_year: request.year, type_name: request.kind };
         else {
             item = await first;
+            if (item && request.year && request.kind) {
+                await new Promise(resolve => setTimeout(resolve, 280));
+                item = window.LibreExperience?.chooseCandidate(session.items, request, read('viewingHistory', [])) || item;
+            }
             if (!item) {
                 await session.discovery;
                 if (groups(session.items).length > 1) {
@@ -208,7 +213,7 @@
                     setStatus('找到不同版本，请确认要观看的作品');
                     item = await waitForChoice(session, true);
                     confirmed = true;
-                } else item = session.items.find(candidate => candidate.source_code === session.history?.sourceName) || session.items[0];
+                } else item = window.LibreExperience?.chooseCandidate(session.items, request, read('viewingHistory', [])) || session.items[0];
             }
         }
         if (session.manual && !confirmed) item = null;
@@ -246,7 +251,12 @@
         else window.showSwitchResourceModal?.();
     }
     function onError() {
-        if (!state || state.preparing || state.played || state.manual || state.retries >= 2) return false;
+        if (!state || state.preparing || state.played || state.manual) return false;
+        if (state.current && !state.current.failureRecorded) {
+            state.current.failureRecorded = true;
+            window.LibreExperience?.recordQuality(state.current.item.source_code, {started:false});
+        }
+        if (state.retries >= 2) return false;
         if (state.retrying) return true;
         state.retrying = true;
         clearTimeout(startupTimer);
@@ -259,7 +269,8 @@
             // A single movie needs no cross-source episode mapping.
             const saved = current.detail.episodes.length === 1 && state.request.kind === 'movie' ? { ...resume, singleMovie: true } : resume;
             let succeeded = false;
-            for (const item of state.items) {
+            const options = [...state.items].sort((a,b) => (window.LibreExperience?.qualityScore(b.source_code) || 0) - (window.LibreExperience?.qualityScore(a.source_code) || 0));
+            for (const item of options) {
                 const key = `${item.source_code}:${item.vod_id}`;
                 if (state.tried.has(key) || state.retries >= 2) continue;
                 if (!matches(item, state.request)) continue;
@@ -287,15 +298,31 @@
     function attach(video) {
         clearTimeout(startupTimer);
         activeVideo = video;
-        if (!state || state.manual) return;
+        const source = new URLSearchParams(location.search).get('source');
+        const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        let frameRecorded = false;
+        let hasPlayed = false;
+        const recordFirstFrame = () => {
+            if (activeVideo !== video || frameRecorded) return;
+            frameRecorded = true;
+            const elapsed = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+            window.LibreExperience?.recordQuality(source, {started:true, firstFrameMs:elapsed});
+        };
         video.addEventListener('playing', () => {
             if (activeVideo !== video) return;
+            hasPlayed = true;
             if (state) state.played = true;
             clearTimeout(startupTimer);
             setStatus('播放中');
+            if (typeof video.requestVideoFrameCallback === 'function') video.requestVideoFrameCallback(recordFirstFrame);
+            else recordFirstFrame();
         }, { once: true });
+        video.addEventListener('waiting', () => {
+            if (activeVideo === video && hasPlayed && !video.paused && !video.seeking) window.LibreExperience?.recordStall(source);
+        });
         video.addEventListener('error', () => { if (activeVideo === video) onError(); });
         video.addEventListener('pause', () => { if (activeVideo === video && video.readyState >= 2 && !state?.retrying) stop(); });
+        if (!state || state.manual) return;
         startupTimer = setTimeout(() => {
             // Loaded/paused media usually means autoplay was blocked: do not change source.
             if (video.readyState >= 2) { setStatus('已准备好，点击播放器开始观看'); return; }

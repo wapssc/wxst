@@ -380,12 +380,96 @@ function getViewingHistory() {
     }
 }
 
+function renderHomeGuide() {
+    const guide = document.getElementById('homeEmptyGuide');
+    if (!guide) return;
+    const searching = !document.getElementById('resultsArea')?.classList.contains('hidden');
+    guide.classList.toggle('hidden', searching || localStorage.getItem('doubanEnabled') === 'true' ||
+        Boolean(window.LibreExperience?.unfinishedHistory(getViewingHistory()).length) || Boolean(window.LibreExperience?.watchLater().length));
+}
+function enableHomeRecommendations() {
+    localStorage.setItem('doubanEnabled', 'true');
+    const toggle = document.getElementById('doubanToggle');
+    if (toggle) toggle.checked = true;
+    window.updateDoubanVisibility?.();
+    renderHomeGuide();
+}
+window.renderHomeGuide = renderHomeGuide;
+window.enableHomeRecommendations = enableHomeRecommendations;
+document.addEventListener('DOMContentLoaded', renderHomeGuide);
+
+function renderWatchLater() {
+    const section = document.getElementById('watchLater');
+    const list = document.getElementById('watchLaterList');
+    if (!section || !list || !window.LibreExperience) return;
+    const entries = LibreExperience.watchLater();
+    const searching = !document.getElementById('resultsArea')?.classList.contains('hidden');
+    section.classList.toggle('hidden', !entries.length || searching);
+    list.replaceChildren();
+    renderHomeGuide();
+    for (const item of entries.slice(0, 8)) {
+        const card = document.createElement('div');
+        card.className = 'continue-card watch-later-card';
+        const play = document.createElement('button');
+        play.type = 'button';
+        play.textContent = `${item.title} · ${item.year || '年份未知'} · 播放`;
+        play.onclick = () => QuickPlay.open(item);
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.textContent = '移除';
+        remove.setAttribute('aria-label', `从稍后看移除${item.title}`);
+        remove.onclick = () => { LibreExperience.removeWatchLater(item); renderWatchLater(); };
+        card.append(play, remove);
+        list.appendChild(card);
+    }
+}
+window.renderWatchLater = renderWatchLater;
+document.addEventListener('DOMContentLoaded', renderWatchLater);
+window.addEventListener('storage', event => { if (event.key === 'watchLaterV1') renderWatchLater(); });
+
+function renderContinueWatching(records = getViewingHistory()) {
+    const section = document.getElementById('continueWatching');
+    const list = document.getElementById('continueWatchingList');
+    if (!section || !list || !window.LibreExperience) return;
+    const entries = LibreExperience.unfinishedHistory(records).slice(0, 5);
+    const searching = !document.getElementById('resultsArea')?.classList.contains('hidden');
+    section.classList.toggle('hidden', !entries.length || searching);
+    list.replaceChildren();
+    renderHomeGuide();
+    for (const item of entries) {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'continue-card';
+        const title = document.createElement('strong');
+        title.textContent = item.title;
+        const details = document.createElement('span');
+        const episode = item.episodeName || (item.episodes?.length > 1 ? `第 ${Number(item.episodeIndex || 0) + 1} 集` : '正片');
+        const percent = item.duration > 0 ? ` · 已看 ${Math.min(99, Math.round(item.playbackPosition / item.duration * 100))}%` : '';
+        details.textContent = `${episode}${percent} · 继续播放`;
+        card.append(title, details);
+        if (item.duration > 0) {
+            const progress = document.createElement('div');
+            progress.className = 'continue-progress';
+            const fill = document.createElement('span');
+            fill.style.width = `${Math.min(100, Math.max(0, item.playbackPosition / item.duration * 100))}%`;
+            progress.appendChild(fill);
+            card.appendChild(progress);
+        }
+        card.onclick = () => QuickPlay.open({title:item.title, year:item.movieYear || '', kind:item.movieKind || '', id:item.vod_id, source:item.sourceName});
+        list.appendChild(card);
+    }
+}
+window.renderContinueWatching = renderContinueWatching;
+document.addEventListener('DOMContentLoaded', () => renderContinueWatching());
+window.addEventListener('storage', event => { if (event.key === 'viewingHistory') renderContinueWatching(); });
+
 // 加载观看历史并渲染
 function loadViewingHistory() {
     const historyList = document.getElementById('historyList');
     if (!historyList) return;
 
     const history = getViewingHistory();
+    renderContinueWatching(history);
 
     if (history.length === 0) {
         historyList.innerHTML = `<div class="text-center text-gray-500 py-8">暂无观看记录</div>`;
@@ -680,6 +764,7 @@ async function playFromHistory(url, title, episodeIndex, playbackPosition = 0) {
             }
         }
         localStorage.setItem('currentEpisodeNames', JSON.stringify(historyItem?.episodeNames || []));
+        window.EpisodeContext?.write({source:sourceNameForUrl, id:idForUrl, episodes:episodesList, episodeNames:historyItem?.episodeNames || []});
         window.location.assign(destination.toString());
     } catch (e) {
         // console.error('从历史记录播放失败:', e);

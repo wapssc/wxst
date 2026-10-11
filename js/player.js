@@ -83,6 +83,7 @@ let currentEpisodeIndex = 0;
 let art = null; // 用于 ArtPlayer 实例
 let currentHls = null; // 跟踪当前HLS实例
 let currentEpisodes = [];
+let currentEpisodeNames = [];
 let episodesReversed = false;
 let autoplayEnabled = true; // 默认开启自动连播
 let videoHasEnded = false; // 跟踪视频是否已经自然结束
@@ -1171,39 +1172,42 @@ async function initializePageContent() {
         localStorage.setItem('autoplayEnabled', autoplayEnabled);
     });
 
-    // 优先使用URL传递的集数信息，否则从localStorage获取
+    // A shared localStorage episode list can belong to another browser tab.
+    // Accept only the list for this tab and exact source/video/URL.
     try {
-        if (episodesList) {
-            // 如果URL中有集数数据，优先使用它
-            currentEpisodes = JSON.parse(decodeURIComponent(episodesList));
-
-        } else {
-            // 否则从localStorage获取
-            currentEpisodes = JSON.parse(localStorage.getItem('currentEpisodes') || '[]');
-
+        const context = window.EpisodeContext?.read({source:sourceCode, id:videoId, url:videoUrl});
+        if (context) {
+            currentEpisodes = context.episodes;
+            currentEpisodeNames = context.episodeNames || [];
+        } else if (episodesList) {
+            const fromUrl = JSON.parse(decodeURIComponent(episodesList));
+            currentEpisodes = Array.isArray(fromUrl) && fromUrl.includes(videoUrl) ? fromUrl : [];
+        } else if (!sourceCode && !videoId) {
+            const legacy = JSON.parse(localStorage.getItem('currentEpisodes') || '[]');
+            currentEpisodes = Array.isArray(legacy) && legacy.includes(videoUrl) ? legacy : [];
         }
-
-        // 检查集数索引是否有效，如果无效则调整为0
-        if (index < 0 || (currentEpisodes.length > 0 && index >= currentEpisodes.length)) {
-            // 如果索引太大，则使用最大有效索引
-            if (index >= currentEpisodes.length && currentEpisodes.length > 0) {
-                index = currentEpisodes.length - 1;
-            } else {
-                index = 0;
-            }
-
-            // 更新URL以反映修正后的索引
-            const newUrl = new URL(window.location.href);
-            newUrl.searchParams.set('index', index);
-            window.history.replaceState({}, '', newUrl);
+        if (!currentEpisodes.length && videoId && sourceCode && isDirectPlayableVideoUrl(videoUrl)) {
+            // Shared links/new tabs have no session cache: verify episodes against the source detail.
+            try {
+                const params = getDetailApiParamsForSource(sourceCode);
+                const response = await fetch(`/api/detail?id=${encodeURIComponent(videoId)}${params}`, {signal:AbortSignal.timeout(6500)});
+                if (response.ok) {
+                    const detail = await response.json();
+                    if (detail.episodes?.includes(videoUrl)) {
+                        currentEpisodes = detail.episodes;
+                        currentEpisodeNames = detail.episodeNames || [];
+                        window.EpisodeContext?.write({source:sourceCode, id:videoId, episodes:currentEpisodes, episodeNames:currentEpisodeNames});
+                    }
+                }
+            } catch (error) { console.warn('无法同步集数，仍可播放当前视频:', error); }
         }
-
-        // 更新当前索引为验证过的值
+        if (!currentEpisodes.length && videoUrl) currentEpisodes = [videoUrl];
+        index = currentEpisodes.indexOf(videoUrl) >= 0 ? currentEpisodes.indexOf(videoUrl) : 0;
         currentEpisodeIndex = index;
-
         episodesReversed = localStorage.getItem('episodesReversed') === 'true';
-    } catch (e) {
-        currentEpisodes = [];
+    } catch (error) {
+        currentEpisodes = videoUrl ? [videoUrl] : [];
+        currentEpisodeNames = [];
         currentEpisodeIndex = 0;
         episodesReversed = false;
     }
@@ -1217,6 +1221,7 @@ async function initializePageContent() {
                 currentEpisodes = resolved.episodes;
                 currentEpisodeIndex = resolved.index;
                 localStorage.setItem('currentEpisodes', JSON.stringify(currentEpisodes));
+                window.EpisodeContext?.write({source:sourceCode, id:videoId, episodes:currentEpisodes});
                 localStorage.setItem('currentEpisodeIndex', currentEpisodeIndex);
 
                 const newUrl = new URL(window.location.href);
@@ -2014,7 +2019,7 @@ function playEpisode(index) {
     currentUrl.searchParams.set('index', index);
     currentUrl.searchParams.set('url', url);
     currentUrl.searchParams.delete('position');
-    currentUrl.searchParams.set('episodeName', JSON.parse(localStorage.getItem('currentEpisodeNames') || '[]')[index] || '');
+    currentUrl.searchParams.set('episodeName', currentEpisodeNames[index] || '');
     window.history.replaceState({}, '', currentUrl.toString());
 
     if (isWebkit) {
@@ -2202,7 +2207,7 @@ function saveToHistory() {
         timestamp: Date.now(),
         playbackPosition: currentPosition,
         duration: videoDuration,
-        episodeNames: JSON.parse(localStorage.getItem('currentEpisodeNames') || '[]'),
+        episodeNames: [...currentEpisodeNames],
         episodes: currentEpisodes && currentEpisodes.length > 0 ? [...currentEpisodes] : []
     };
     
@@ -2565,24 +2570,48 @@ function renderResourceInfoBar() {
         <span>${escapeHtmlAttr(resourceName)}</span>
         <span class="resource-info-bar-videos">${currentEpisodes.length > 1 ? '第 ' + (currentEpisodeIndex + 1) + ' / ' + currentEpisodes.length + ' 集' : '正片'}</span>
       </div>
-      <button class="resource-switch-btn flex" id="switchResourceBtn" onclick="showSwitchResourceModal()">
-        <span class="resource-switch-icon">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 4v16m0 0l-6-6m6 6l6-6" stroke="#a67c2d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </span>
-        切换资源
-      </button>
       <div class="quick-player-actions">
+        <button type="button" class="resource-switch-btn" id="switchResourceBtn" onclick="showSwitchResourceModal()">换源</button>
         ${currentEpisodes.length > 1 ? '<button type="button" id="quickEpisodesButton" aria-expanded="false" onclick="toggleQuickEpisodes()">选集</button>' : ''}
-        <button type="button" id="quickSettingsButton" aria-expanded="false" onclick="toggleQuickSettings()">播放设置</button>
-        <button type="button" onclick="QuickPlay.details()">影片详情</button>
-        <button type="button" onclick="QuickPlay.restart()">从头播放</button>
+        <button type="button" id="quickSettingsButton" aria-expanded="false" onclick="toggleQuickSettings()">更多</button>
       </div>
     `;
     document.querySelectorAll('.quick-episode-section').forEach(section => { section.hidden = true; });
+    document.getElementById('quickMoreActions')?.replaceChildren();
+    renderQuickMoreActions();
+}
+
+function renderQuickMoreActions() {
+    const container = document.getElementById('quickMoreActions');
+    if (!container) return;
+    for (const [label, action] of [['影片详情', () => QuickPlay.details()], ['播放设置', () => {
+        document.getElementById('playbackOptions').hidden = false;
+    }], ['从头播放', button => confirmQuickRestart(button)]]) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = label;
+        button.onclick = () => action(button);
+        container.appendChild(button);
+    }
+}
+
+let pendingRestartTimer = null;
+function confirmQuickRestart(button) {
+    if (!art?.video || art.video.currentTime < 30 || button.dataset.confirmRestart === 'true') {
+        clearTimeout(pendingRestartTimer);
+        button.dataset.confirmRestart = '';
+        button.textContent = '从头播放';
+        QuickPlay.restart();
+        return;
+    }
+    button.dataset.confirmRestart = 'true';
+    button.textContent = '再点一次从头播放';
+    clearTimeout(pendingRestartTimer);
+    pendingRestartTimer = setTimeout(() => { button.dataset.confirmRestart = ''; button.textContent = '从头播放'; }, 4000);
 }
 
 function toggleQuickSettings() {
-    const section = document.getElementById('playbackOptions');
+    const section = document.getElementById('quickMoreActions');
     section.hidden = !section.hidden;
     document.getElementById('quickSettingsButton')?.setAttribute('aria-expanded', String(!section.hidden));
 }
@@ -2593,12 +2622,13 @@ function toggleQuickEpisodes() {
     const expanded = button?.getAttribute('aria-expanded') !== 'true';
     button?.setAttribute('aria-expanded', String(expanded));
     document.querySelectorAll('.quick-episode-section').forEach(section => { section.hidden = !expanded; });
-    document.getElementById('quickSettingsButton')?.setAttribute('aria-expanded', String(expanded));
+    document.getElementById('quickSettingsButton')?.setAttribute('aria-expanded', String(!document.getElementById('quickMoreActions').hidden));
 }
 
 window.QuickPlay.useSelection = ({ item, detail, index }) => {
     currentVideoTitle = item.vod_name;
     currentEpisodes = detail.episodes;
+    currentEpisodeNames = detail.episodeNames || [];
     currentEpisodeIndex = index;
     currentVideoUrl = detail.episodes[index];
     document.getElementById('error').style.display = 'none';
@@ -2676,7 +2706,8 @@ function formatSpeedDisplay(speedResult) {
     }
     const { label, title } = window.SourceSpeed.describeResult(speedResult);
     const tone = { smooth: 'good', ok: 'medium', slow: 'poor' }[speedResult.verdict] || 'good';
-    return `<span class="speed-indicator ${tone}" title="${escapeHtmlAttr(title)}">${escapeHtmlAttr(label)}</span>`;
+    const latency = Number.isFinite(speedResult.latencyMs) ? ` · 延迟 ${Math.round(speedResult.latencyMs)} ms` : '';
+    return `<span class="speed-indicator ${tone}" title="${escapeHtmlAttr(title)}">${escapeHtmlAttr(label + latency)}</span>`;
 }
 
 async function showSwitchResourceModal() {
@@ -2693,7 +2724,7 @@ async function showSwitchResourceModal() {
     const modalContent = document.getElementById('modalContent');
 
     moveModalToFullscreenHost(modal);
-    modalTitle.innerHTML = `<span class="break-words">${currentVideoTitle}</span>`;
+    modalTitle.textContent = currentVideoTitle;
     modalContent.innerHTML = '<div style="text-align:center;padding:20px;color:#aaa;grid-column:1/-1;">正在加载资源列表...</div>';
     modal.classList.remove('hidden');
 
@@ -2714,109 +2745,60 @@ async function showSwitchResourceModal() {
         return;
     }
 
-    let allResults = {};
-    await Promise.allSettled(resourceOptions.map(async (opt) => {
-        const queryResult = await searchByAPIAndKeyWord(opt.key, currentVideoTitle);
-        if (!Array.isArray(queryResult) || queryResult.length === 0) {
-            return 
-        }
-        const request = { title: currentVideoTitle, year: urlParams.get('year') || '', kind: urlParams.get('kind') || '' };
-        const result = queryResult.find(item => QuickPlay.logic.matches(item, request));
-        if (result) allResults[opt.key] = result;
-    }));
-    if (probeController.signal.aborted) return;
-
-    if (Object.keys(allResults).length === 0) {
-        modalContent.innerHTML = '<div style="text-align:center;padding:20px;color:#aaa;grid-column:1/-1;">未找到可切换资源，请稍后重试或更换片名搜索。</div>';
-        return;
-    }
-
-    const speedResults = {};
-    const sortedResults = Object.entries(allResults).sort(([keyA, resultA], [keyB, resultB]) => {
-        // 当前播放的源放在最前面
-        const isCurrentA = String(keyA) === String(currentSourceCode) && String(resultA.vod_id) === String(currentVideoId);
-        const isCurrentB = String(keyB) === String(currentSourceCode) && String(resultB.vod_id) === String(currentVideoId);
-        if (isCurrentA && !isCurrentB) return -1;
-        if (!isCurrentA && isCurrentB) return 1;
-        return 0;
-    });
-
-    // 先显示全部资源，再逐项更新采样速率。
-    let html = '<div class="resource-switch-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 p-4">';
-    
-    for (const [index, [sourceKey, result]] of sortedResults.entries()) {
-        if (!result) continue;
-        
-        // 修复 isCurrentSource 判断，确保类型一致
-        const isCurrentSource = String(sourceKey) === String(currentSourceCode) && String(result.vod_id) === String(currentVideoId);
-        const sourceName = resourceOptions.find(opt => opt.key === sourceKey)?.name || '未知资源';
-        const coverUrl = normalizeImageUrl(result.vod_pic);
-        const safeCoverUrl = escapeHtmlAttr(coverUrl);
-        const safeVodName = escapeHtmlAttr(result.vod_name);
-        
-        html += `
-            <div class="relative group ${isCurrentSource ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:scale-105 transition-transform'}"
-                 data-resource-card="${index}" data-current="${isCurrentSource}"
-                 ${!isCurrentSource ? `onclick="switchToResource('${sourceKey}', '${result.vod_id}')"` : ''}>
-                <div class="aspect-[2/3] rounded-lg overflow-hidden bg-gray-800 relative">
-                    <img src="${safeCoverUrl}" data-original-src="${safeCoverUrl}"
-                         alt="${safeVodName}"
-                         class="w-full h-full object-cover"
-                         onerror="window.setImageProxyFallback(this, this.dataset.originalSrc, '无封面')"
-                         loading="lazy" referrerpolicy="no-referrer">
-                    
-                    <!-- 速率显示在图片右上角 -->
-                    <div class="absolute top-1 right-1 speed-badge bg-black bg-opacity-75" data-speed-badge="${index}">
-                        ${formatSpeedDisplay(null)}
-                    </div>
-                </div>
-                <div class="mt-2">
-                    <div class="text-xs font-medium text-gray-200 truncate">${result.vod_name}</div>
-                    <div class="text-[10px] text-gray-400 truncate">${sourceName}</div>
-                    <div class="text-[10px] text-gray-500 mt-1" data-episode-count="${index}">
-                    </div>
-                </div>
-                ${isCurrentSource ? `
-                    <div class="absolute inset-0 flex items-center justify-center">
-                        <div class="bg-blue-600 bg-opacity-75 rounded-lg px-2 py-0.5 text-xs text-white font-medium">
-                            当前播放
-                        </div>
-                    </div>
-                ` : ''}
-            </div>
-        `;
-    }
-    
-    html += '</div>';
-    modalContent.innerHTML = html;
-
-    let nextIndex = 0;
-    const worker = async () => {
-        while (nextIndex < sortedResults.length && !probeController.signal.aborted) {
-            const index = nextIndex++;
-            const [sourceKey, result] = sortedResults[index];
-            const measured = await testVideoSourceSpeed(sourceKey, result.vod_id, probeController.signal);
-            if (probeController.signal.aborted || resourceSwitchProbeController !== probeController) return;
-            speedResults[sourceKey] = measured;
-            const badge = modalContent.querySelector(`[data-speed-badge="${index}"]`);
-            if (badge) badge.innerHTML = formatSpeedDisplay(measured);
-            const episodeCount = modalContent.querySelector(`[data-episode-count="${index}"]`);
-            if (episodeCount && measured.episodes) episodeCount.textContent = `${measured.episodes}集`;
+    // Show each matching source as soon as its search returns; sampling is independent.
+    modalContent.innerHTML = '<div class="resource-switch-grid" role="list" aria-label="可选播放来源"></div><p class="resource-switch-progress" role="status">正在查找其他来源…</p>';
+    const list = modalContent.querySelector('.resource-switch-grid');
+    const progress = modalContent.querySelector('.resource-switch-progress');
+    const request = {title:currentVideoTitle, year:urlParams.get('year') || '', kind:urlParams.get('kind') || ''};
+    const seen = new Set();
+    const probeQueue = [];
+    let running = 0;
+    const pump = () => {
+        while (running < 3 && probeQueue.length && !probeController.signal.aborted) {
+            const {source, result, row} = probeQueue.shift();
+            running++;
+            void testVideoSourceSpeed(source, result.vod_id, probeController.signal).then(measured => {
+                if (probeController.signal.aborted || resourceSwitchProbeController !== probeController) return;
+                row.querySelector('[data-speed-badge]').innerHTML = formatSpeedDisplay(measured);
+                if (measured.episodes) row.querySelector('[data-episode-count]').textContent = `${measured.episodes}集`;
+            }).finally(() => { running--; pump(); });
         }
     };
-    void Promise.all(Array.from({ length: Math.min(3, sortedResults.length) }, worker)).then(() => {
-        if (probeController.signal.aborted || resourceSwitchProbeController !== probeController) return;
-        const grid = modalContent.querySelector('.resource-switch-grid');
-        if (!grid) return;
-        const cards = Array.from(grid.children);
-        cards.sort((a, b) => {
-            if (a.dataset.current !== b.dataset.current) return a.dataset.current === 'true' ? -1 : 1;
-            const keyA = sortedResults[Number(a.dataset.resourceCard)][0];
-            const keyB = sortedResults[Number(b.dataset.resourceCard)][0];
-            return window.SourceSpeed.scoreResult(speedResults[keyB]) - window.SourceSpeed.scoreResult(speedResults[keyA]);
-        });
-        cards.forEach(card => grid.appendChild(card));
-    });
+    const addResult = (source, result) => {
+        if (seen.has(source) || probeController.signal.aborted) return;
+        const isCurrent = source === currentSourceCode && String(result.vod_id) === String(currentVideoId);
+        seen.add(source);
+        const row = document.createElement('div');
+        row.className = 'resource-switch-row';
+        row.dataset.current = String(isCurrent);
+        row.setAttribute('role', 'listitem');
+        const sourceName = resourceOptions.find(opt => opt.key === source)?.name || API_SITES[source]?.name || '未知资源';
+        row.innerHTML = `<div class="resource-switch-row-main"><strong>${escapeHtmlAttr(sourceName)}</strong>
+            ${isCurrent ? '<span class="resource-current-label">当前播放</span>' : ''}<small data-episode-count>集数待确认</small></div>
+            <div class="resource-switch-row-meta"><span data-speed-badge>${formatSpeedDisplay(null)}</span></div>`;
+        if (!isCurrent) {
+            const button = document.createElement('button');
+            button.type = 'button'; button.className = 'resource-switch-choose'; button.textContent = '切换';
+            button.onclick = () => switchToResource(source, result.vod_id);
+            row.querySelector('.resource-switch-row-meta').appendChild(button);
+        }
+        if (isCurrent) list.prepend(row); else list.appendChild(row);
+        probeQueue.push({source, result, row});
+        pump();
+    };
+    if (currentSourceCode && currentVideoId) addResult(currentSourceCode, {vod_id:currentVideoId});
+    await Promise.allSettled(resourceOptions.map(async opt => {
+        await searchByAPIAndKeyWord(opt.key, currentVideoTitle, batch => {
+            if (probeController.signal.aborted || seen.has(opt.key)) return;
+            const result = batch.find(item => {
+                const info = QuickPlay.logic.identity(item);
+                return QuickPlay.logic.matches(item, request) && (!request.year || info.year === request.year) && (!request.kind || info.kind === request.kind);
+            });
+            if (result) addResult(opt.key, result);
+        }, probeController.signal);
+    }));
+    if (probeController.signal.aborted) return;
+    progress.textContent = seen.size ? `已找到 ${seen.size} 个来源；测速仅供参考` : '未找到可切换资源，请稍后重试或更换片名搜索。';
 }
 
 // 切换资源的函数
@@ -2872,6 +2854,7 @@ async function switchToResource(sourceKey, vodId) {
         const sameEpisode = data.episodeNames?.[targetIndex] && QuickPlay.historyInfo().episodeName &&
             data.episodeNames[targetIndex] === QuickPlay.historyInfo().episodeName;
         localStorage.setItem('currentEpisodeNames', JSON.stringify(data.episodeNames || []));
+        window.EpisodeContext?.write({source:sourceKey, id:vodId, episodes:data.episodes, episodeNames:data.episodeNames || []});
 
         // 获取目标集数的URL
         const targetUrl = data.episodes[targetIndex];

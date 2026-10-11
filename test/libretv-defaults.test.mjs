@@ -146,7 +146,7 @@ test('image helpers normalize common cover URL formats', async () => {
   );
 });
 
-test('movie card images avoid hotlink referrers and use authenticated proxy fallback', async () => {
+test('movie card images avoid hotlink referrers while the player switcher uses poster-free rows', async () => {
   const app = await readProjectFile('js/app.js');
   const douban = await readProjectFile('js/douban.js');
   const player = await readProjectFile('js/player.js');
@@ -154,8 +154,8 @@ test('movie card images avoid hotlink referrers and use authenticated proxy fall
   assert.match(app, /referrerpolicy="no-referrer"/);
   assert.match(app, /setImageProxyFallback/);
   assert.match(douban, /setImageProxyFallback/);
-  assert.match(player, /referrerpolicy="no-referrer"/);
-  assert.match(player, /setImageProxyFallback/);
+  assert.match(player, /resource-switch-row/);
+  assert.doesNotMatch(player.slice(player.indexOf('let html ='), player.indexOf('let nextIndex = 0', player.indexOf('resource-switch-grid'))), /<img/);
 });
 
 test('detail parsing prefers directly playable m3u8 sources over share pages', async () => {
@@ -1233,11 +1233,11 @@ test('release metadata is bumped for this update', async () => {
 
   const changelog = await readProjectFile('CHANGELOG.md');
 
-  assert.equal(packageJson.version, '1.2.25');
-  assert.equal(lockJson.version, '1.2.25');
-  assert.equal(lockJson.packages[''].version, '1.2.25');
-  assert.match(config, /version:\s*'1\.2\.25'/);
-  assert.match(serviceWorker, /const APP_VERSION = '202610120410'/);
+  assert.equal(packageJson.version, '1.2.26');
+  assert.equal(lockJson.version, '1.2.26');
+  assert.equal(lockJson.packages[''].version, '1.2.26');
+  assert.match(config, /version:\s*'1\.2\.26'/);
+  assert.match(serviceWorker, /const APP_VERSION = '202610120530'/);
   assert.match(serviceWorker, /'\/css\/theme\.css'/);
   assert.match(serviceWorker, /'\/js\/source-speed\.js'/);
   assert.match(changelog, /## 1\.2\.24 - 2026-10-10[\s\S]*?Douban recommendations load once/);
