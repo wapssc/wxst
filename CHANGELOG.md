@@ -2,6 +2,18 @@
 
 All notable changes to this maintained LibreTV fork are documented here.
 
+## 1.2.27 - 2026-10-12
+
+### Added
+
+- The player page shows the current video's synopsis, metadata, and optional cover below playback.
+- Related titles place other seasons or film installments first in release order, followed by same-type recommendations.
+- Recommendations use source popularity when available, then ratings and newer releases; the popular feed fills sparse source catalogs without delaying playback.
+
+### Fixed
+
+- Matching franchise titles from multiple sources are deduplicated, and the current work, trailers, and commentary are excluded.
+
 ## 1.2.26 - 2026-10-12
 
 ### Added

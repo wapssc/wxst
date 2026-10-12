@@ -10,7 +10,7 @@ execFileSync('ffmpeg', ['-hide_banner','-loglevel','error','-f','lavfi','-i','te
 const base = process.env.LIBRETV_BASE_URL || 'http://127.0.0.1:8080';
 const hash = createHash('sha256').update(process.env.LIBRETV_TEST_PASSWORD || 'browser-test-only').digest('hex');
 const browser = await chromium.launch({executablePath:process.env.CHROMIUM_PATH || '/usr/bin/chromium', headless:true,args:['--no-sandbox','--autoplay-policy=no-user-gesture-required']});
-async function scenario({mobile=false, series=false, history=false, ambiguous=false, failure=false, unmapped=false, adult=false, historyEntry=false, manualSwitch=false, allfail=false}) {
+async function scenario({mobile=false, series=false, history=false, ambiguous=false, failure=false, unmapped=false, adult=false, historyEntry=false, manualSwitch=false, allfail=false, slowCategory=false}) {
  const context=await browser.newContext({serviceWorkers:'block',viewport:mobile?{width:390,height:844}:{width:1280,height:900},isMobile:mobile,hasTouch:mobile,userAgent:mobile?'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36':undefined});
  const title=ambiguous?'同名测试':series?'体验测试剧集':'体验测试电影';
  await context.addInitScript(({hash,history,title,series,unmapped,allfail})=>{
@@ -21,19 +21,34 @@ async function scenario({mobile=false, series=false, history=false, ambiguous=fa
  },{hash,history,title,series,unmapped,allfail});
  const page=await context.newPage();page.setDefaultTimeout(30000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
  let searches=0, details=0;
- await page.route('**/test-media/**',async route=>{
+ await context.route('**/test-media/**',async route=>{
   const filename=new URL(route.request().url()).pathname.split('/').at(-1);
   if(filename==='broken.m3u8')return route.fulfill({status:404,body:'missing'});
   const body=await readFile(join(mediaDir,filename));
   return route.fulfill({status:200,contentType:filename.endsWith('.m3u8')?'application/vnd.apple.mpegurl':'video/mp2t',body});
  });
- await page.route('**/proxy/**',async route=>{
+ await context.route('**/proxy/**',async route=>{
   const u=new URL(route.request().url());const target=new URL(decodeURIComponent(u.pathname.slice('/proxy/'.length)));
+  if(slowCategory&&target.hostname.includes('douban.com'))return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({subjects:[{title:'热门同类片',year:'2024',rate:'9.1',cover:''}]})});
   const source=target.hostname.includes('jszy')?'jszy':'ysgc';
   if(!target.searchParams.has('ac'))return route.fulfill({status:200,contentType:'application/json',body:'{"subjects":[],"list":[]}'});
   if(target.searchParams.has('wd'))searches++;
-  const item=(id,year='2026')=>({vod_id:id,vod_name:title,vod_year:year,type_name:series?'国产剧':'剧情片',vod_content:'用于真实解码验收的视频',vod_play_from:'hls',vod_play_url:series?`第01集$${base}/test-media/index.m3u8?ep=1#第02集$${base}/test-media/index.m3u8?ep=2`:`正片$${base}/test-media/${allfail||(failure&&source==='ysgc')?'broken':'index'}.m3u8`});
+  const item=(id,year='2026')=>({vod_id:id,vod_name:title,vod_year:year,type_name:series?'国产剧':'剧情片',type_id:'6',vod_content:'用于真实解码验收的视频',vod_play_from:'hls',vod_play_url:series?`第01集$${base}/test-media/index.m3u8?ep=1#第02集$${base}/test-media/index.m3u8?ep=2`:`正片$${base}/test-media/${allfail||(failure&&source==='ysgc')?'broken':'index'}.m3u8`});
   let list=ambiguous?[item('amb-old','1998'),item('amb-new','2026')]:[item(series?'series1':'movie1')];
+  if(manualSwitch&&target.searchParams.has('wd'))list.push(
+   {...item('sequel-2','2024'),vod_name:`${title}2`},
+   {...item('sequel-1','2020'),vod_name:`${title}1`}
+  );
+  if(series&&target.searchParams.has('wd'))list.push(
+   {...item('series-next','2027'),vod_name:`${title} 第二季`},
+   {...item('series-first','2024'),vod_name:`${title} 第一季`}
+  );
+  if(manualSwitch&&target.searchParams.has('t'))list=[
+   {...item('related-new','2025'),vod_name:'同类新片'},
+   {...item('related-hot','2018'),vod_name:'同类热片',vod_hits:'1500'},
+   {...item('related-score','2020'),vod_name:'同类高分片',vod_score:'8.8'}
+  ];
+  if(slowCategory&&target.searchParams.has('t')){await new Promise(resolve=>setTimeout(resolve,5000));list=[];}
   const id=target.searchParams.get('ids');if(id)details++;if(id)list=list.filter(x=>String(x.vod_id)===id);
   if(source==='jszy'&&!history)await new Promise(r=>setTimeout(r,100));
   return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({code:1,list})});
@@ -63,6 +78,20 @@ async function scenario({mobile=false, series=false, history=false, ambiguous=fa
  if(history&&!unmapped){assert.ok(media.time>=15);assert.equal(new URL(page.url()).searchParams.get('source'),'jszy');}
  if(unmapped){assert.equal(new URL(page.url()).searchParams.get('index'),'1');assert.equal(new URL(page.url()).searchParams.has('position'),false);}
  if(adult)assert.equal(new URL(page.url()).searchParams.get('source'),'jszy');
+ if(slowCategory)await page.locator('#relatedRecommendations button strong').filter({hasText:'热门同类片'}).waitFor({timeout:2500});
+ if(series&&!unmapped){
+  await page.waitForFunction(()=>document.querySelectorAll('#franchiseRecommendations button').length===2);
+  assert.deepEqual(await page.locator('#franchiseRecommendations button strong').allTextContents(),['体验测试剧集 第一季','体验测试剧集 第二季']);
+ }
+ if(manualSwitch){
+  await page.locator('#playerSynopsis').getByText('用于真实解码验收的视频').waitFor();
+  await page.waitForFunction(()=>document.querySelectorAll('#franchiseRecommendations button').length===2);
+  assert.deepEqual(await page.locator('#franchiseRecommendations button strong').allTextContents(),['体验测试电影1','体验测试电影2']);
+  await page.waitForFunction(()=>document.querySelectorAll('#relatedRecommendations button').length===3);
+  assert.deepEqual(await page.locator('#relatedRecommendations button strong').allTextContents(),['同类热片','同类高分片','同类新片']);
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await page.screenshot({path:'/tmp/libretv-player-recommendations-mobile.png',fullPage:true});
+ }
  if(manualSwitch){
   await page.locator('#switchResourceBtn').click();
   await page.locator('.resource-switch-row[data-current="true"]').waitFor();
@@ -118,6 +147,16 @@ async function scenario({mobile=false, series=false, history=false, ambiguous=fa
  assert.match(await page.locator('#modalContent').innerText(),/真实解码验收/);
  await page.screenshot({path:`/tmp/quick-play-${mobile?'mobile':'desktop'}-${series?'series':ambiguous?'ambiguous':failure?'fallback':'movie'}.png`});
  assert.deepEqual(errors,[]);
+ if(manualSwitch){
+  const direct=await context.newPage();
+  await direct.goto(page.url());
+  await direct.locator('#playerSynopsis').getByText('用于真实解码验收的视频').waitFor();
+  await direct.close();
+  await page.evaluate(()=>closeModal());
+  await page.locator('#relatedRecommendations button').first().click();
+  await page.waitForURL(url=>url.searchParams.get('title')==='同类热片');
+  assert.equal(new URL(page.url()).searchParams.get('id'),'related-hot');
+ }
  console.log(JSON.stringify({mobile,series,history,ambiguous,failure,media}));await context.close();
 }
 const cases = {
@@ -127,6 +166,7 @@ const cases = {
  fallback: {failure:true},
  unmapped: {series:true,history:true,unmapped:true},
  adult: {adult:true},
+ slow_recommendations: {mobile:true,slowCategory:true},
  exhausted: {allfail:true}
 };
 try {

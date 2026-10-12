@@ -1262,6 +1262,9 @@ async function initializePageContent() {
     // 更新按钮状态
     updateButtonStates();
 
+    // Metadata and recommendations load independently of video startup.
+    void window.PlayerRecommendations?.load();
+
     // 更新排序按钮状态
     updateOrderButton();
 

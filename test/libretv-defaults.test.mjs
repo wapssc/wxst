@@ -1233,11 +1233,12 @@ test('release metadata is bumped for this update', async () => {
 
   const changelog = await readProjectFile('CHANGELOG.md');
 
-  assert.equal(packageJson.version, '1.2.26');
-  assert.equal(lockJson.version, '1.2.26');
-  assert.equal(lockJson.packages[''].version, '1.2.26');
-  assert.match(config, /version:\s*'1\.2\.26'/);
-  assert.match(serviceWorker, /const APP_VERSION = '202610120530'/);
+  assert.equal(packageJson.version, '1.2.27');
+  assert.equal(lockJson.version, '1.2.27');
+  assert.equal(lockJson.packages[''].version, '1.2.27');
+  assert.match(config, /version:\s*'1\.2\.27'/);
+  assert.match(serviceWorker, /const APP_VERSION = '202610121035'/);
+  assert.match(serviceWorker, /'\/js\/player-recommendations\.js'/);
   assert.match(serviceWorker, /'\/css\/theme\.css'/);
   assert.match(serviceWorker, /'\/js\/source-speed\.js'/);
   assert.match(changelog, /## 1\.2\.24 - 2026-10-10[\s\S]*?Douban recommendations load once/);

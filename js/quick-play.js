@@ -389,5 +389,5 @@
         const index = Number(params.get('index') || 0);
         return { movieYear: params.get('year') || '', movieKind: params.get('kind') || '', episodeName: params.get('episodeName') || state?.current?.detail?.episodeNames?.[index] || '' };
     }
-    window.QuickPlay = { open, prepare, manual, stop, onError, attach, details, restart, historyInfo, cancelChoice, resolveSwitchIndex, logic: { matches, groups, episodeIndex, findHistory, identity } };
+    window.QuickPlay = { open, prepare, manual, stop, onError, attach, details, restart, historyInfo, cancelChoice, resolveSwitchIndex, currentDetail: () => state?.current?.detail || null, logic: { matches, groups, episodeIndex, findHistory, identity } };
 })();

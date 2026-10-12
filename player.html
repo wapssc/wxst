@@ -169,6 +169,21 @@
                 </div>
             </div>
         </div>
+
+        <section class="player-container player-discovery" aria-label="影片介绍与推荐">
+            <div class="player-synopsis-panel">
+                <h2>影片简介</h2>
+                <div id="playerSynopsis" aria-live="polite">正在加载影片信息…</div>
+            </div>
+            <section id="franchiseSection" class="player-recommendation-section" aria-labelledby="franchiseHeading" hidden>
+                <h2 id="franchiseHeading">同系列作品 <span>按上映时间</span></h2>
+                <div id="franchiseRecommendations" class="player-recommendation-grid"></div>
+            </section>
+            <section class="player-recommendation-section" aria-labelledby="relatedHeading">
+                <h2 id="relatedHeading">同类型推荐 <span>热度优先，参考评分和上映时间</span></h2>
+                <div id="relatedRecommendations" class="player-recommendation-grid" aria-live="polite">正在查找同类型作品…</div>
+            </section>
+        </section>
     </main>
 
     <!-- 添加快捷键提示元素 -->
@@ -250,6 +265,7 @@
     <script src="js/search.js"></script>
     <script src="js/quick-play.js"></script>
     <script src="js/experience.js"></script>
+    <script src="js/player-recommendations.js"></script>
     <script src="js/episode-context.js"></script>
     <script src="js/modal-accessibility.js"></script>
     <script src="js/player-errors.js"></script>

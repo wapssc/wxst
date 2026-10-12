@@ -79,5 +79,71 @@
             return (historyB + qualityScore(b.source_code)) - (historyA + qualityScore(a.source_code));
         })[0] || null;
     }
-    window.LibreExperience = { groupResults, unfinishedHistory, watchLater, addWatchLater, removeWatchLater, recordQuality, recordStall, qualityScore, chooseCandidate, year };
+    function seriesStem(title, kind) {
+        let stem = String(title || '').normalize('NFKC').trim();
+        if (kind === 'tv') stem = stem.replace(/[\s·:：\-]*(?:第\s*)?[一二三四五六七八九十百零两\d]{1,4}季$/u, '').replace(/[\s·:：\-]*(?:season|s)\s*\d{1,3}$/i, '');
+        else if (kind === 'movie') stem = stem.replace(/[\s·:：\-]*(?:第\s*)?[一二三四五六七八九十\d]{1,3}(?:部|集)?$/u, '');
+        return normalize(stem);
+    }
+    function releaseValue(item) {
+        const date = String(item.vod_pubdate || item.vod_year || item.year || '').match(/((?:19|20)\d{2})(?:[-/.年](\d{1,2}))?(?:[-/.月](\d{1,2}))?/);
+        return date ? Number(date[1]) * 10000 + Number(date[2] || 0) * 100 + Number(date[3] || 0) : 99999999;
+    }
+    function franchiseRecommendations(items, current) {
+        const stem = seriesStem(current.title, current.kind);
+        if (stem.length < 2 || !['movie', 'tv'].includes(current.kind)) return [];
+        const found = new Map();
+        for (const item of items || []) {
+            const info = identity(item);
+            if (info.kind !== current.kind || seriesStem(info.title, info.kind) !== stem) continue;
+            if (/解说|预告|花絮|剪辑/.test(`${info.title} ${item.type_name || ''}`)) continue;
+            if (normalize(info.title) === normalize(current.title) && (!info.year || info.year === year(current.year))) continue;
+            const key = [normalize(info.title), info.year, info.kind].join('|');
+            if (!found.has(key)) found.set(key, item);
+        }
+        return [...found.values()].sort((a, b) => releaseValue(a) - releaseValue(b) ||
+            String(a.vod_name).localeCompare(String(b.vod_name), 'zh-Hans-CN'));
+    }
+    function metric(value) {
+        const raw = String(value ?? '').replace(/,/g, '').trim();
+        const match = raw.match(/^(\d+(?:\.\d+)?)(万|亿)?$/);
+        return match ? Number(match[1]) * ({'万':10000,'亿':100000000}[match[2]] || 1) : null;
+    }
+    function relatedRecommendations(items, current) {
+        const found = new Map();
+        const currentStem = seriesStem(current.title, current.kind);
+        for (const item of items || []) {
+            const info = identity(item);
+            if (info.kind !== current.kind || !info.title) continue;
+            if (currentStem && seriesStem(info.title, info.kind) === currentStem) continue;
+            if (/解说|预告|花絮|剪辑/.test(`${info.title} ${item.type_name || ''}`)) continue;
+            if (current.type && normalize(item.type_name || item.type) !== normalize(current.type) &&
+                !(current.categoryId && String(item.type_id) === String(current.categoryId))) continue;
+            const key = [normalize(info.title), info.year, info.kind].join('|');
+            if (!found.has(key)) found.set(key, { ...item });
+            else {
+                const saved = found.get(key);
+                const score = [metric(saved.vod_score ?? saved.rate ?? saved.rating), metric(item.vod_score ?? item.rate ?? item.rating)].filter(value => value !== null);
+                const hits = [metric(saved.vod_hits ?? saved.vod_hits_all ?? saved.hits), metric(item.vod_hits ?? item.vod_hits_all ?? item.hits)].filter(value => value !== null);
+                if (item.source_code && item.vod_id && !(saved.source_code && saved.vod_id)) {
+                    const cover = saved.vod_pic;
+                    Object.assign(saved, item);
+                    if (!saved.vod_pic) saved.vod_pic = cover;
+                }
+                if (score.length) saved.vod_score = Math.max(...score);
+                if (hits.length) saved.vod_hits = Math.max(...hits);
+            }
+        }
+        const rank = item => {
+            const hits = metric(item.vod_hits ?? item.vod_hits_all ?? item.hits);
+            const score = metric(item.vod_score ?? item.rate ?? item.rating);
+            return [hits > 0 ? 2 : score > 0 ? 1 : 0, hits || 0, score || 0, -releaseValue(item)];
+        };
+        return [...found.values()].sort((a, b) => {
+            const left = rank(a), right = rank(b);
+            for (let i = 0; i < left.length; i++) if (left[i] !== right[i]) return right[i] - left[i];
+            return 0;
+        });
+    }
+    window.LibreExperience = { groupResults, unfinishedHistory, watchLater, addWatchLater, removeWatchLater, recordQuality, recordStall, qualityScore, chooseCandidate, year, seriesStem, franchiseRecommendations, relatedRecommendations };
 })();
