@@ -19,11 +19,18 @@
         image.alt = '';
         image.referrerPolicy = 'no-referrer';
         image.onerror = () => window.setImagePlaceholder(image, title);
+        const poster = document.createElement('span');
+        poster.className = 'player-recommendation-poster';
+        const rating = document.createElement('span');
+        rating.className = 'player-recommendation-rating';
+        const score = Number(item.vod_score ?? item.rate ?? item.rating);
+        rating.textContent = `★ ${Number.isFinite(score) && score > 0 && score <= 10 ? score.toFixed(1) : '暂无'}`;
+        poster.append(image, rating);
         const name = document.createElement('strong');
         name.textContent = title;
         const caption = document.createElement('small');
         caption.textContent = [year, item.source_name || (item.source_code ? window.API_SITES?.[item.source_code]?.name : '热门推荐')].filter(Boolean).join(' · ');
-        button.append(image, name, caption);
+        button.append(poster, name, caption);
         button.onclick = () => window.QuickPlay.open({title, year, kind, source:item.source_code || '', id:item.vod_id || ''});
         return button;
     }

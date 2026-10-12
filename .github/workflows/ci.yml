@@ -53,6 +53,7 @@ jobs:
           node --check js/quick-play.js
           node --check js/experience.js
           node --check js/player-recommendations.js
+          node --check js/mobile-fullscreen.js
           node --check js/episode-context.js
           node --check js/modal-accessibility.js
           node --check scripts/smoke-quick-play.mjs

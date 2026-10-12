@@ -89,6 +89,8 @@ async function scenario({mobile=false, series=false, history=false, ambiguous=fa
   assert.deepEqual(await page.locator('#franchiseRecommendations button strong').allTextContents(),['体验测试电影1','体验测试电影2']);
   await page.waitForFunction(()=>document.querySelectorAll('#relatedRecommendations button').length===3);
   assert.deepEqual(await page.locator('#relatedRecommendations button strong').allTextContents(),['同类热片','同类高分片','同类新片']);
+  assert.equal(await page.locator('#relatedRecommendations .player-recommendation-rating').count(),3);
+  assert.match(await page.locator('#relatedRecommendations .player-recommendation-rating').nth(1).innerText(),/★\s*8\.8/);
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await page.screenshot({path:'/tmp/libretv-player-recommendations-mobile.png',fullPage:true});
  }
@@ -130,6 +132,60 @@ async function scenario({mobile=false, series=false, history=false, ambiguous=fa
    Object.defineProperty(document,'fullscreenElement',{configurable:true,get:()=>null});
    return {success,rejected,locked,unlocked};
   });assert.equal(orientation.success,true);assert.equal(orientation.rejected,false);assert.ok(orientation.unlocked>0);
+ }
+ if(mobile&&manualSwitch){
+  await page.evaluate(()=>Object.defineProperty(document,'fullscreenEnabled',{configurable:true,get:()=>false}));
+  await page.locator('.art-control-fullscreen').evaluate(el=>el.click());
+  await page.waitForFunction(()=>art.fullscreenWeb && document.querySelector('.art-video-player.mobile-fullscreen-interaction'));
+  const surface=await page.locator('.art-video-player').boundingBox();
+  await page.screenshot({path:'/tmp/libretv-mobile-fullscreen.png'});
+  const tapX=surface.x+surface.width*0.25,tapY=surface.y+surface.height*0.45;
+  const cdp=await context.newCDPSession(page);
+  async function tap(x,y){await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y,id:1}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});}
+  const before=await page.locator('video').evaluate(v=>({paused:v.paused,time:v.currentTime}));
+  await tap(tapX,tapY);
+  assert.equal(await page.locator('.art-video-player').evaluate(el=>el.classList.contains('mobile-fullscreen-chrome-visible')),false);
+  await tap(tapX,tapY);
+  assert.equal(await page.locator('.art-video-player').evaluate(el=>el.classList.contains('mobile-fullscreen-chrome-visible')),true);
+  assert.equal(await page.locator('video').evaluate(v=>v.paused),false,'surface taps must not pause playback');
+  assert.ok(await page.locator('.mobile-fullscreen-title').innerText());
+  assert.match(await page.locator('.mobile-fullscreen-time').innerText(),/\d+:\d+/);
+  await page.locator('.mobile-fullscreen-seek').evaluate(el=>{el.value='25';el.dispatchEvent(new Event('input',{bubbles:true}));});
+  assert.ok(await page.locator('video').evaluate(v=>v.currentTime)>=9,'fullscreen progress remains seekable');
+  await page.locator('.mobile-fullscreen-play').click();
+  assert.equal(await page.locator('video').evaluate(v=>v.paused),true);
+  await page.locator('.mobile-fullscreen-play').click();
+  assert.equal(await page.locator('video').evaluate(v=>v.paused),false);
+  await page.locator('.mobile-fullscreen-more').click();
+  assert.equal(await page.locator('.art-video-player').evaluate(el=>el.classList.contains('mobile-fullscreen-native-controls')),true);
+  assert.equal(await page.locator('.art-controls').evaluate(el=>getComputedStyle(el).display==='none'),false,'other player controls stay accessible');
+  await page.locator('.mobile-fullscreen-more').click();
+  async function swipe(x,y,toY){
+   for(const [type,atY] of [['touchStart',y],['touchMove',(y+toY)/2],['touchMove',toY],['touchEnd',toY]]){
+    await cdp.send('Input.dispatchTouchEvent',{type,touchPoints:type==='touchEnd'?[]:[{x,y:atY,id:1}]});
+   }
+  }
+  await swipe(surface.x+surface.width*0.25,surface.y+surface.height*0.3,surface.y+surface.height*0.6);
+  assert.ok(Number(await page.locator('.art-video-player').getAttribute('data-brightness'))<100);
+  assert.match(await page.locator('.mobile-fullscreen-level').innerText(),/亮度/);
+  const oldVolume=await page.locator('video').evaluate(v=>v.volume);
+  await swipe(surface.x+surface.width*0.75,surface.y+surface.height*0.6,surface.y+surface.height*0.3);
+  assert.ok(await page.locator('video').evaluate(v=>v.volume)>oldVolume);
+  assert.match(await page.locator('.mobile-fullscreen-level').innerText(),/音量/);
+  assert.equal(await page.locator('.art-video-player').evaluate(el=>el.classList.contains('mobile-fullscreen-chrome-visible')),true,'swipes preserve open controls');
+  assert.equal(await page.locator('video').evaluate(v=>v.paused),false);
+  await page.locator('.mobile-fullscreen-exit').click();
+  await page.waitForFunction(()=>!art.fullscreenWeb&&!document.querySelector('.art-video-player')?.classList.contains('mobile-fullscreen-interaction'));
+  assert.equal(await page.locator('.art-video-player').evaluate(el=>el.classList.contains('mobile-fullscreen-interaction')),false);
+  assert.ok((await page.locator('video').evaluate(v=>v.currentTime))>=before.time);
+ }
+ if(!mobile&&ambiguous){
+  await page.evaluate(()=>{art.fullscreenWeb=true;});
+  await page.waitForFunction(()=>art.fullscreenWeb);
+  assert.equal(await page.locator('.art-video-player').evaluate(el=>el.classList.contains('mobile-fullscreen-interaction')),false);
+  await page.locator('.art-video').click({position:{x:40,y:40}});
+  await page.waitForFunction(()=>document.querySelector('video').paused);
+  await page.evaluate(()=>{art.video.play();art.fullscreenWeb=false;});
  }
  if(await page.locator('#quickMoreActions').isVisible())await page.locator('#quickSettingsButton').click();
  await page.locator('#quickSettingsButton').click();

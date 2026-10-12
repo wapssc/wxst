@@ -101,6 +101,7 @@ let progressPreviewCleanup = null; // 进度条预览事件清理器
 let progressPreviewSeekTimer = null; // 进度条预览 seek 节流
 let progressPreviewDestroyTimer = null; // 延迟销毁预览资源
 let playerSurfaceCleanup = null; // 播放器画面点击事件清理器
+let mobileFullscreenInteraction = null;
 let playerTopActionsEl = null; // 播放器顶部浮动按钮容器
 let playerControlDensityCleanup = null; // 播放器控制栏密度事件清理器
 let castAvailabilityCleanup = null; // 投屏可用性监听清理器
@@ -372,7 +373,7 @@ function getPlayerFullscreenHost() {
     }
 
     if (art?.fullscreen || art?.fullscreenWeb) {
-        return playerEl?.closest('.art-video-player') || playerEl;
+        return art?.template?.$player || playerEl?.closest('.art-video-player') || playerEl;
     }
 
     return null;
@@ -389,6 +390,7 @@ function updatePlayerControlDensity() {
     const fullscreenActive = isPlayerFullscreenActive();
     playerEl.classList.toggle('player-fullscreen-controls', fullscreenActive);
     playerEl.classList.toggle('mobile-portrait-compact-controls', isMobilePortraitViewport() && !fullscreenActive);
+    mobileFullscreenInteraction?.sync();
 }
 
 function setupPlayerControlDensity() {
@@ -434,6 +436,10 @@ function unlockLandscapeOrientation() {
 
 function toggleFullscreenMode() {
     if (!art) return;
+    if (!document.fullscreenEnabled && isMobilePlaybackDevice()) {
+        art.fullscreenWeb = !art.fullscreenWeb;
+        return;
+    }
     if (!document.fullscreenEnabled && typeof art.video?.webkitEnterFullscreen === 'function') {
         try { art.video.webkitEnterFullscreen(); } catch {}
         return;
@@ -444,7 +450,7 @@ function toggleFullscreenMode() {
 
 function shouldIgnorePlayerSurfaceToggle(event) {
     const target = event?.target;
-    const playerEl = document.getElementById('player');
+    const playerEl = art?.template?.$player || document.getElementById('player');
     if (!target || !playerEl || !playerEl.contains(target)) return true;
     if (target.closest(PLAYER_SURFACE_INTERACTIVE_SELECTOR)) return true;
     return false;
@@ -457,7 +463,7 @@ function togglePlaybackFromSurface() {
 }
 
 function setupPlayerSurfaceToggle() {
-    const playerEl = document.getElementById('player');
+    const playerEl = art?.template?.$player || document.getElementById('player');
     if (!playerEl) return;
 
     if (playerSurfaceCleanup) {
@@ -483,6 +489,11 @@ function setupPlayerSurfaceToggle() {
 
     const handleSurfaceClick = (event) => {
         if (shouldIgnorePlayerSurfaceToggle(event)) return;
+        if (mobileFullscreenInteraction?.active) {
+            consumeSurfaceEvent(event);
+            if (!mobileFullscreenInteraction.shouldSuppressClick()) mobileFullscreenInteraction.toggleChrome();
+            return;
+        }
         if (event.detail > 1) return;
 
         consumeSurfaceEvent(event);
@@ -495,6 +506,10 @@ function setupPlayerSurfaceToggle() {
 
     const handleSurfaceDoubleClick = (event) => {
         if (shouldIgnorePlayerSurfaceToggle(event)) return;
+        if (mobileFullscreenInteraction?.active) {
+            consumeSurfaceEvent(event);
+            return;
+        }
 
         consumeSurfaceEvent(event);
         clearClickTimer();
@@ -1437,6 +1452,8 @@ function initPlayer(videoUrl) {
 
     // 销毁旧实例
     if (art) {
+        mobileFullscreenInteraction?.destroy();
+        mobileFullscreenInteraction = null;
         if (playerSurfaceCleanup) {
             playerSurfaceCleanup();
             playerSurfaceCleanup = null;
@@ -1623,6 +1640,11 @@ function initPlayer(videoUrl) {
     });
 
     window.QuickPlay?.attach(art.video);
+    mobileFullscreenInteraction = window.createMobileFullscreenControls(
+        art.template.$player, art,
+        { title: () => currentVideoTitle, isFullscreen: isPlayerFullscreenActive,
+          isTouchDevice: isMobilePlaybackDevice }
+    );
     art.video.addEventListener('webkitbeginfullscreen', () => maybeLockLandscapeOrientation());
     art.video.addEventListener('webkitendfullscreen', () => unlockLandscapeOrientation());
 
@@ -2399,6 +2421,7 @@ function setupLongPressSpeedControl() {
 
     // 触摸开始事件
     playerElement.addEventListener('touchstart', function (e) {
+        if (mobileFullscreenInteraction?.active) return;
         // 检查视频是否正在播放，如果没有播放则不触发长按功能
         if (art.video.paused) {
             return; // 视频暂停时不触发长按功能

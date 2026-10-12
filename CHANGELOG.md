@@ -2,6 +2,17 @@
 
 All notable changes to this maintained LibreTV fork are documented here.
 
+## 1.2.28 - 2026-10-12
+
+### Added
+
+- Recommendation posters show a bottom-left star rating, matching home-page cards.
+- Touchscreen fullscreen playback uses tap-to-show controls, a dedicated center play/pause button, a seek bar, and swipe gestures for video brightness and media volume. Other player controls remain available through More.
+
+### Fixed
+
+- Fullscreen gestures and controls stay attached to the video when Artplayer moves it into its fullscreen layer.
+
 ## 1.2.27 - 2026-10-12
 
 ### Added
